@@ -1,0 +1,39 @@
+# GPU overlay: adds the vLLM model server and points the API at it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Requires Linux + NVIDIA Container Toolkit (or WSL2). vLLM does not run on
+# Apple Silicon / macOS Docker.
+name: nuextract3-studio
+
+services:
+  vllm:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.vllm
+    image: nuextract3-vllm:local
+    restart: unless-stopped
+    gpus: all
+    ipc: host
+    shm_size: "16gb"
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_ID: ${NUEXTRACT_MODEL_NAME:-numind/NuExtract3}
+      HF_TOKEN: ${HF_TOKEN:-}
+      MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-32768}
+      GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+      MAX_IMAGES_PER_PROMPT: ${VLLM_MAX_IMAGES_PER_PROMPT:-16}
+      SPECULATIVE_CONFIG: ${VLLM_SPECULATIVE_CONFIG:-}
+    volumes:
+      - hf-cache:/models/huggingface
+
+  api:
+    environment:
+      NUEXTRACT_MODEL_BASE_URL: http://vllm:8000/v1
+    depends_on:
+      vllm:
+        condition: service_healthy
+
+volumes:
+  hf-cache:

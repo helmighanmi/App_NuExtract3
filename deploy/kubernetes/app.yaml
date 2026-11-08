@@ -1,0 +1,149 @@
+# API + Streamlit. The API is stateless and scales horizontally; the GPU
+# deployment (vllm.yaml) is the only stateful/expensive component.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nuextract-api
+  labels:
+    app: nuextract-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nuextract-api
+  template:
+    metadata:
+      labels:
+        app: nuextract-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-org/nuextract3-studio:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: NUEXTRACT_ENVIRONMENT
+              value: production
+            - name: NUEXTRACT_PROVIDER
+              value: vllm
+            - name: NUEXTRACT_MODEL_BASE_URL
+              value: http://nuextract-vllm:8000/v1
+            - name: NUEXTRACT_MODEL_NAME
+              value: numind/NuExtract3
+            - name: NUEXTRACT_MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nuextract-api
+                  key: model-api-key
+                  optional: true
+            - name: NUEXTRACT_MAX_UPLOAD_MB
+              value: "50"
+            - name: NUEXTRACT_MAX_PAGES
+              value: "40"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nuextract-api
+spec:
+  selector:
+    app: nuextract-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nuextract-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nuextract-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nuextract-studio
+  labels:
+    app: nuextract-studio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nuextract-studio
+  template:
+    metadata:
+      labels:
+        app: nuextract-studio
+    spec:
+      containers:
+        - name: studio
+          image: ghcr.io/your-org/nuextract3-studio:latest
+          command:
+            - streamlit
+            - run
+            - apps/streamlit/app.py
+            - --server.address=0.0.0.0
+            - --server.port=8501
+            - --server.headless=true
+            - --browser.gatherUsageStats=false
+          ports:
+            - containerPort: 8501
+              name: http
+          env:
+            - name: NUEXTRACT_API_BASE_URL
+              value: http://nuextract-api:8080
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nuextract-studio
+spec:
+  selector:
+    app: nuextract-studio
+  ports:
+    - name: http
+      port: 8501
+      targetPort: http
