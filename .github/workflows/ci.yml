@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, types, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.5"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy src
+
+      - name: Tests
+        run: uv run pytest -q
+
+  docker:
+    name: Build CPU image
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -f docker/Dockerfile.app -t nuextract3-studio:ci .
+
+      - name: Smoke test image
+        run: |
+          docker run -d --name studio -p 8080:8080 nuextract3-studio:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/health
+          docker rm -f studio
