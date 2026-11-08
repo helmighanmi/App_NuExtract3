@@ -1,0 +1,45 @@
+name: nuextract3-studio
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    image: nuextract3-studio:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      NUEXTRACT_ENVIRONMENT: ${NUEXTRACT_ENVIRONMENT:-local}
+      NUEXTRACT_LOG_LEVEL: ${NUEXTRACT_LOG_LEVEL:-INFO}
+      NUEXTRACT_PROVIDER: ${NUEXTRACT_PROVIDER:-vllm}
+      NUEXTRACT_MODEL_BASE_URL: ${NUEXTRACT_DOCKER_MODEL_BASE_URL:-http://host.docker.internal:8000/v1}
+      NUEXTRACT_MODEL_API_KEY: ${NUEXTRACT_MODEL_API_KEY:-EMPTY}
+      NUEXTRACT_MODEL_NAME: ${NUEXTRACT_MODEL_NAME:-numind/NuExtract3}
+      NUEXTRACT_MAX_UPLOAD_MB: ${NUEXTRACT_MAX_UPLOAD_MB:-50}
+      NUEXTRACT_MAX_PAGES: ${NUEXTRACT_MAX_PAGES:-40}
+      NUEXTRACT_PAGES_PER_REQUEST: ${NUEXTRACT_PAGES_PER_REQUEST:-8}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  studio:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    image: nuextract3-studio:local
+    restart: unless-stopped
+    command:
+      - streamlit
+      - run
+      - apps/streamlit/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    ports:
+      - "8501:8501"
+    environment:
+      NUEXTRACT_API_BASE_URL: http://api:8080
+    depends_on:
+      api:
+        condition: service_healthy

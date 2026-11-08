@@ -1,0 +1,23 @@
+{
+  "_description": "Rental and service contracts: parties, term, amounts and signature dates.",
+  "contract_title": "verbatim-string",
+  "contract_type": ["lease", "service", "employment", "nda", "sale", "other"],
+  "effective_date": "date",
+  "end_date": "date",
+  "party_a": {
+    "name": "verbatim-string",
+    "address": "string",
+    "representative": "verbatim-string"
+  },
+  "party_b": {
+    "name": "verbatim-string",
+    "address": "string",
+    "representative": "verbatim-string"
+  },
+  "monthly_amount": "number",
+  "total_amount": "number",
+  "currency": "currency",
+  "notice_period": "string",
+  "governing_law": "string",
+  "signed_by": ["verbatim-string"]
+}

@@ -1,0 +1,30 @@
+{
+  "_description": "Invoices: vendor, customer, totals, payment terms and line items.",
+  "invoice_number": "verbatim-string",
+  "invoice_date": "date",
+  "due_date": "date",
+  "vendor": {
+    "name": "verbatim-string",
+    "address": "string",
+    "tax_id": "verbatim-string",
+    "email": "email"
+  },
+  "customer": {
+    "name": "verbatim-string",
+    "address": "string",
+    "tax_id": "verbatim-string"
+  },
+  "currency": ["USD", "EUR", "GBP", "TND", "Other"],
+  "subtotal": "number",
+  "tax": "number",
+  "total": "number",
+  "payment_terms": "string",
+  "line_items": [
+    {
+      "description": "verbatim-string",
+      "quantity": "number",
+      "unit_price": "number",
+      "total": "number"
+    }
+  ]
+}

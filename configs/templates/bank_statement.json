@@ -1,0 +1,22 @@
+{
+  "_description": "Bank statements: account, statement period, balances and transactions.",
+  "bank_name": "verbatim-string",
+  "account_holder": "verbatim-string",
+  "account_number": "verbatim-string",
+  "iban": "verbatim-string",
+  "statement_period_start": "date",
+  "statement_period_end": "date",
+  "opening_balance": "number",
+  "closing_balance": "number",
+  "currency": "currency",
+  "transactions": [
+    {
+      "date": "date",
+      "description": "verbatim-string",
+      "reference": "string",
+      "debit": "number",
+      "credit": "number",
+      "balance": "number"
+    }
+  ]
+}

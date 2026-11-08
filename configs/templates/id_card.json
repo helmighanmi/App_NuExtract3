@@ -1,0 +1,16 @@
+{
+  "_description": "Identity documents: personal details, document numbers and validity dates.",
+  "document_type": ["passport", "national_id", "driver_license", "residence_permit", "other"],
+  "issuing_country": "country",
+  "document_number": "verbatim-string",
+  "first_name": "verbatim-string",
+  "last_name": "verbatim-string",
+  "date_of_birth": "date",
+  "place_of_birth": "string",
+  "nationality": "country",
+  "sex": ["M", "F", "X", "unspecified"],
+  "date_of_issue": "date",
+  "date_of_expiry": "date",
+  "mrz_line_1": "verbatim-string",
+  "mrz_line_2": "verbatim-string"
+}

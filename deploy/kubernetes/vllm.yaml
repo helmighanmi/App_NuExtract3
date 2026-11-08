@@ -1,0 +1,112 @@
+# vLLM model server for numind/NuExtract3.
+# Build/push the image first:
+#   docker build -f docker/Dockerfile.vllm -t ghcr.io/your-org/nuextract3-vllm:latest .
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nuextract-models
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nuextract-vllm
+  labels:
+    app: nuextract-vllm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: nuextract-vllm
+  template:
+    metadata:
+      labels:
+        app: nuextract-vllm
+    spec:
+      # Adjust to your GPU node label, e.g. cloud.google.com/gke-accelerator.
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      containers:
+        - name: vllm
+          image: ghcr.io/your-org/nuextract3-vllm:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: MODEL_ID
+              value: numind/NuExtract3
+            - name: MAX_MODEL_LEN
+              value: "32768"
+            - name: GPU_MEMORY_UTILIZATION
+              value: "0.90"
+            - name: MAX_IMAGES_PER_PROMPT
+              value: "16"
+            - name: HF_HOME
+              value: /models/huggingface
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: token
+                  optional: true
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: shm
+              mountPath: /dev/shm
+          resources:
+            requests:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "16"
+              memory: 64Gi
+              nvidia.com/gpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+            failureThreshold: 80
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            failureThreshold: 6
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: nuextract-models
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nuextract-vllm
+  labels:
+    app: nuextract-vllm
+spec:
+  selector:
+    app: nuextract-vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

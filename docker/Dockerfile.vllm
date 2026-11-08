@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1.7
+# GPU image: vLLM OpenAI-compatible server for numind/NuExtract3.
+#
+# Pin the base image in production, e.g. vllm/vllm-openai:v0.11.0.
+# NuExtract3 needs a recent vLLM with Qwen3.5 support.
+FROM vllm/vllm-openai:latest
+
+ENV HF_HOME=/models/huggingface \
+    HF_HUB_ENABLE_HF_TRANSFER=0
+
+COPY deploy/vllm/serve.sh /usr/local/bin/nuextract-serve
+RUN chmod +x /usr/local/bin/nuextract-serve
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+
+ENTRYPOINT ["/usr/local/bin/nuextract-serve"]
