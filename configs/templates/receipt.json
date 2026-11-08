@@ -1,0 +1,21 @@
+{
+  "_description": "Retail and restaurant receipts: merchant, date, total and purchased items.",
+  "merchant": "verbatim-string",
+  "merchant_address": "string",
+  "date": "date-time",
+  "receipt_number": "verbatim-string",
+  "payment_method": ["cash", "credit card", "debit card", "mobile payment", "other"],
+  "currency": "currency",
+  "subtotal": "number",
+  "tax": "number",
+  "tip": "number",
+  "total": "number",
+  "items": [
+    {
+      "name": "verbatim-string",
+      "quantity": "number",
+      "unit_price": "number",
+      "total": "number"
+    }
+  ]
+}
