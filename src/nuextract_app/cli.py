@@ -227,7 +227,6 @@ def generate_template(
 @app.command()
 def health() -> None:
     """Check that the inference backend is reachable."""
-    settings = get_settings()
     pipeline = _pipeline()
 
     async def run() -> bool:
@@ -237,13 +236,19 @@ def health() -> None:
             await pipeline.close()
 
     healthy = asyncio.run(run())
+    info = pipeline.backend_info()
+    endpoint = info.endpoint or "in-process"
     if healthy:
         console.print(
-            f"[green]OK[/green] {settings.provider} backend at {settings.openai_base_url} "
-            f"serving {settings.model_name}"
+            f"[green]OK[/green] {info.provider} backend at {endpoint} serving {info.model} "
+            f"(device={info.device or 'remote'}, dtype={info.dtype or 'n/a'})"
         )
+        if info.note:
+            console.print(f"[dim]{info.note}[/dim]")
     else:
-        console.print(f"[red]UNREACHABLE[/red] {settings.openai_base_url}")
+        console.print(f"[red]UNREACHABLE[/red] {endpoint}")
+        if info.note:
+            console.print(f"[dim]{info.note}[/dim]")
         raise typer.Exit(1)
 
 

@@ -2,7 +2,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 PY := uv run
 
-.PHONY: help install lock api ui test lint fmt typecheck check docker-build up up-gpu down logs vllm sample eval
+.PHONY: help install lock api ui test lint fmt typecheck check docker-build cpu-image up up-cpu up-gpu down logs vllm ollama sample eval
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -34,14 +34,23 @@ typecheck: ## Mypy
 
 check: lint typecheck test ## CI-equivalent checks
 
-docker-build: ## Build the CPU image
+docker-build: ## Build the CPU app image (no model weights)
 	docker compose build
 
-up: ## Start API + Streamlit (external vLLM or CPU fallback config)
+cpu-image: ## Build the self-contained CPU image (in-process Transformers)
+	docker build -f docker/Dockerfile.cpu -t nuextract3-studio:cpu .
+
+up: ## Start API + Streamlit (external vLLM or remote endpoint)
 	docker compose up --build -d
+
+up-cpu: ## Start Ollama + API + Streamlit on CPU (no GPU required)
+	docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
 
 up-gpu: ## Start vLLM + API + Streamlit (NVIDIA GPU required)
 	docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+
+ollama: ## Pull the quantized NuExtract3 GGUF for local Ollama
+	ollama pull $${NUEXTRACT_OLLAMA_MODEL:-nuextract3:q4_k_m}
 
 down: ## Stop the stack
 	docker compose down

@@ -5,12 +5,22 @@ build-backend = "hatchling.build"
 [project]
 name = "nuextract3-studio"
 version = "0.1.0"
-description = "Document intelligence studio powered by NuExtract3 (vLLM + FastAPI + Streamlit)."
+description = "Document intelligence studio powered by NuExtract3 (vLLM/Ollama + FastAPI + Streamlit)."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Helmi Ghanmi" }]
-keywords = ["nuextract", "vllm", "document-ai", "ocr", "structured-extraction", "vlm"]
+keywords = [
+  "nuextract",
+  "vllm",
+  "ollama",
+  "llama-cpp",
+  "cpu-inference",
+  "document-ai",
+  "ocr",
+  "structured-extraction",
+  "vlm",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -36,7 +46,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# PyPI PyTorch: CUDA on Linux/Windows, Metal (MPS) on macOS.
 local = [
+  "torch>=2.4",
+  "transformers>=4.56",
+  "accelerate>=1.0",
+]
+# CPU-only PyTorch wheels (much smaller on Linux, no CUDA payload).
+cpu = [
   "torch>=2.4",
   "transformers>=4.56",
   "accelerate>=1.0",
@@ -57,8 +74,19 @@ nuextract = "nuextract_app.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/nuextract_app"]
 
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+# CPU-only wheels on Linux/Windows. macOS falls back to the PyPI wheel
+# (the CPU index only publishes Apple Silicon builds for recent torch).
+torch = [{ index = "pytorch-cpu", extra = "cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+
 [tool.uv]
 default-groups = ["dev"]
+conflicts = [[{ extra = "local" }, { extra = "cpu" }]]
 
 [tool.ruff]
 line-length = 100

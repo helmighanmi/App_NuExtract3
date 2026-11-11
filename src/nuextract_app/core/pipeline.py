@@ -8,6 +8,7 @@ from typing import Any
 
 from nuextract_app.config import Settings
 from nuextract_app.core.client import (
+    BackendInfo,
     GenerationRequest,
     ImagePart,
     ModelBackendError,
@@ -306,6 +307,12 @@ class ExtractionPipeline:
             completion_tokens=generation.completion_tokens,
             latency_s=generation.latency_s,
         )
+
+    def backend_info(self) -> BackendInfo:
+        getter = getattr(self.client, "info", None)
+        if callable(getter):
+            return getter()
+        return BackendInfo(provider=self.settings.provider, model=self.settings.model_name)
 
     async def health(self) -> bool:
         try:

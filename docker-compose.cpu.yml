@@ -1,0 +1,64 @@
+# CPU overlay: adds Ollama (official NuExtract3 GGUF) and points the API at it.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+#
+# Works on macOS (Apple Silicon / Intel), Linux and Windows. No NVIDIA GPU is
+# required. Ollama automatically uses Metal on macOS and CUDA/ROCm on hosts that
+# expose a GPU, and falls back to CPU otherwise.
+#
+# The first start downloads the model (~3.4 GB for Q4_K_M) into a named volume;
+# later starts reuse it.
+name: nuextract3-studio
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      # Server-wide defaults are the reliable way to bound KV-cache memory.
+      OLLAMA_CONTEXT_LENGTH: ${NUEXTRACT_OLLAMA_CONTEXT_LENGTH:-32768}
+      OLLAMA_KEEP_ALIVE: ${NUEXTRACT_OLLAMA_KEEP_ALIVE:-30m}
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # One-shot helper: pull the GGUF model before the API reports ready.
+  ollama-pull:
+    image: ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull ${NUEXTRACT_OLLAMA_MODEL:-nuextract3:q4_k_m}"]
+
+  api:
+    environment:
+      NUEXTRACT_PROVIDER: ollama
+      NUEXTRACT_OLLAMA_BASE_URL: http://ollama:11434
+      NUEXTRACT_OLLAMA_MODEL: ${NUEXTRACT_OLLAMA_MODEL:-nuextract3:q4_k_m}
+      NUEXTRACT_OLLAMA_NUM_CTX: ${NUEXTRACT_OLLAMA_CONTEXT_LENGTH:-32768}
+      # CPU generation is slow: allow long documents to finish.
+      NUEXTRACT_REQUEST_TIMEOUT_S: ${NUEXTRACT_REQUEST_TIMEOUT_S:-900}
+      NUEXTRACT_PAGES_PER_REQUEST: ${NUEXTRACT_PAGES_PER_REQUEST:-2}
+      NUEXTRACT_MAX_OUTPUT_TOKENS: ${NUEXTRACT_MAX_OUTPUT_TOKENS:-4096}
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+
+  studio:
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  ollama-models:

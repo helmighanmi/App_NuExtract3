@@ -6,9 +6,11 @@ It handles digital PDFs, scans, photos, receipts, invoices, contracts and multi-
 documents through a single pipeline.
 
 The project is intentionally structured like a production AI service rather than a
-notebook: a stateless FastAPI orchestration layer, a separately deployed GPU
-inference server (vLLM), typed configuration, a template registry, JSON repair and
-output validation, tests, evaluation tooling and a Streamlit demonstrator.
+notebook: a stateless FastAPI orchestration layer, a separately deployed inference
+server (vLLM on GPU, Ollama/llama.cpp on CPU), typed configuration, a template
+registry, JSON repair and output validation, tests, evaluation tooling and a
+Streamlit demonstrator. The same code runs on a GPU server and on a CPU-only
+laptop — only the backend configuration changes.
 
 ## Features
 
@@ -19,8 +21,10 @@ output validation, tests, evaluation tooling and a Streamlit demonstrator.
 - **Hybrid page routing** — native text for digital pages, vision for scanned pages.
 - **Multi-page handling** — page-level chunking with recursive result merging.
 - **Robust post-processing** — code-fence stripping, JSON repair, shape completion.
+- **CPU and GPU backends** — vLLM (GPU), llama.cpp/Ollama GGUF (CPU/GPU),
+  in-process Transformers (CPU/CUDA/MPS), all behind one interface.
 - **Three interfaces** — FastAPI (OpenAPI docs), CLI, Streamlit demo.
-- **Docker & vLLM deployment** — CPU app image + GPU model image + Compose/K8s.
+- **Docker & deployment** — CPU and GPU images, Compose overlays, Kubernetes.
 - **Evaluation harness** — tree-based field scoring on a JSONL golden set.
 
 ## Architecture
@@ -33,17 +37,20 @@ flowchart LR
     ING --> ROUTE{Page router}
     ROUTE -->|digital text| TXT[Text prompt]
     ROUTE -->|scan / image| IMG[Page images]
-    TXT --> VLLM[vLLM<br/>numind/NuExtract3]
-    IMG --> VLLM
-    VLLM --> POST[JSON repair<br/>merge + validate]
+    TXT --> BACKEND[Inference backend]
+    IMG --> BACKEND
+    BACKEND -->|GPU| VLLM[vLLM]
+    BACKEND -->|CPU / Metal| OLLAMA[Ollama / llama.cpp<br/>NuExtract3 GGUF]
+    BACKEND -->|in-process| HF[Transformers<br/>CPU / CUDA / MPS]
+    BACKEND --> POST[JSON repair<br/>merge + validate]
     POST --> API
     API --> UI[(results)]
 ```
 
-**Why vLLM as a separate service?** The model server owns the GPU, batching,
+**Why a separate model server?** The model server owns the accelerator, batching,
 KV-cache and model lifecycle. The API stays stateless, cheap to scale and easy to
-test. It can point to a local container, a Kubernetes deployment, or a remote
-GPU endpoint without code changes.
+test. With `provider=ollama` or `provider=transformers` the same API also runs on
+machines without a GPU.
 
 ## Project structure
 
@@ -56,7 +63,8 @@ GPU endpoint without code changes.
 │   ├── core/
 │   │   ├── document.py       # PDF/image ingestion, rendering, scan detection
 │   │   ├── templates.py      # registry, JSON-Schema conversion, validation
-│   │   ├── client.py         # vLLM (async) + Transformers backends
+│   │   ├── client.py         # vLLM, Ollama, llama.cpp, Transformers, auto
+│   │   ├── runtime.py        # device/dtype detection (CPU, CUDA, MPS)
 │   │   ├── pipeline.py       # routing, chunking, merging, orchestration
 │   │   └── postprocess.py    # JSON repair, recursive merge, shape completion
 │   ├── config.py             # pydantic-settings (env driven)
@@ -64,16 +72,17 @@ GPU endpoint without code changes.
 │   └── cli.py                # `nuextract` Typer CLI
 ├── apps/streamlit/           # demonstrator (pure API client)
 ├── configs/templates/        # invoice, receipt, contract, id_card, bank_statement
-├── docker/                   # Dockerfile.app (CPU) + Dockerfile.vllm (GPU)
+├── docker/                   # Dockerfile.app + Dockerfile.cpu + Dockerfile.vllm
 ├── deploy/
 │   ├── vllm/serve.sh         # production vLLM flags
 │   └── kubernetes/           # Deployment/Service/HPA/PVC manifests
 ├── eval/                     # golden-set runner + tree metrics
 ├── tests/                    # unit + API tests (no GPU required)
 ├── scripts/                  # sample invoice, model download, smoke test
-├── docs/                     # architecture, deployment, extraction notes
+├── docs/                     # architecture, CPU guide, deployment, extraction
 ├── docker-compose.yml        # API + Streamlit (external vLLM)
-└── docker-compose.gpu.yml    # adds vLLM (NVIDIA)
+├── docker-compose.gpu.yml    # adds vLLM (NVIDIA)
+└── docker-compose.cpu.yml    # adds Ollama (CPU/Apple Metal)
 ```
 
 ## Quickstart
@@ -82,22 +91,24 @@ GPU endpoint without code changes.
 
 - Python **3.11 / 3.12**, [uv](https://docs.astral.sh/uv/)
 - Docker (optional)
-- A Linux/NVIDIA GPU for vLLM (or a remote vLLM endpoint)
-- ~10 GB of disk for model weights
+- One inference backend:
+  - an NVIDIA GPU + vLLM (Linux), or a remote vLLM endpoint; **or**
+  - [Ollama](https://ollama.com/download) for CPU / Apple Metal (recommended without a GPU); **or**
+  - ~10 GB of free RAM for the in-process Transformers fallback
 
-> vLLM does **not** run on macOS/Apple Silicon Docker. On a Mac, use a remote GPU
-> endpoint or the CPU `transformers` fallback (very slow, for smoke tests only).
+> vLLM does **not** run on macOS/Apple Silicon Docker. On a Mac, use native Ollama
+> (Metal), the CPU Docker stack, or a remote GPU endpoint.
 
 ### 1. Install
 
 ```bash
 cp .env.example .env
-uv sync
+uv sync                       # add --extra local (GPU/MPS) or --extra cpu (CPU-only)
 ```
 
-### 2. Start NuExtract3 with vLLM
+### 2. Start NuExtract3
 
-Bare metal (Linux + CUDA):
+**GPU — vLLM (best throughput)**
 
 ```bash
 ./deploy/vllm/serve.sh
@@ -106,6 +117,29 @@ SPECULATIVE_CONFIG='{"method":"qwen3_next_mtp","num_speculative_tokens":2}' ./de
 ```
 
 The server exposes an OpenAI-compatible API on `http://localhost:8000/v1`.
+
+**CPU / macOS — Ollama (recommended)**
+
+```bash
+ollama pull nuextract3:q4_k_m
+# in .env:
+#   NUEXTRACT_PROVIDER=ollama
+#   NUEXTRACT_OLLAMA_MODEL=nuextract3:q4_k_m
+#   NUEXTRACT_REQUEST_TIMEOUT_S=900
+```
+
+**CPU — in-process Transformers (no extra service)**
+
+```bash
+uv sync --extra cpu
+# in .env:
+#   NUEXTRACT_PROVIDER=transformers
+#   NUEXTRACT_DEVICE=cpu
+#   NUEXTRACT_DTYPE=bfloat16
+```
+
+`NUEXTRACT_PROVIDER=auto` probes vLLM, then Ollama, then Transformers. For the
+full CPU guide (memory, latency, tuning, llama.cpp), see [docs/cpu.md](docs/cpu.md).
 
 ### 3. Run the app
 
@@ -140,14 +174,27 @@ Full GPU stack (Linux + NVIDIA Container Toolkit):
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 ```
 
+Full CPU stack with Ollama — no GPU required (macOS, Linux, Windows):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build
+```
+
+Self-contained CPU image (in-process Transformers, no model server):
+
+```bash
+docker build -f docker/Dockerfile.cpu -t nuextract3-studio:cpu .
+docker run --rm -p 8080:8080 -e NUEXTRACT_PROVIDER=transformers nuextract3-studio:cpu
+```
+
 Then open <http://localhost:8501> (demo) and <http://localhost:8080/docs> (API).
 
 ## API
 
 | Endpoint | Description |
 | --- | --- |
-| `GET /health` | Liveness + model metadata |
-| `GET /ready` | Checks the vLLM backend |
+| `GET /health` | Liveness + configured provider/device metadata |
+| `GET /ready` | Checks the backend and reports resolved provider/device/dtype |
 | `POST /v1/extract` | Structured extraction (multipart) |
 | `POST /v1/extract/batch` | Up to 20 documents, same template |
 | `POST /v1/markdown` | Document → Markdown |
@@ -192,9 +239,16 @@ All settings are read from `.env` with the `NUEXTRACT_` prefix. Key variables:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NUEXTRACT_PROVIDER` | `vllm` | `vllm` or `transformers` |
-| `NUEXTRACT_MODEL_BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible endpoint |
+| `NUEXTRACT_PROVIDER` | `auto` | `auto`, `vllm`, `llamacpp`, `ollama`, `transformers` |
+| `NUEXTRACT_MODEL_BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible endpoint (vLLM/llama.cpp) |
 | `NUEXTRACT_MODEL_NAME` | `numind/NuExtract3` | Served model name |
+| `NUEXTRACT_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
+| `NUEXTRACT_OLLAMA_MODEL` | `nuextract3:q4_k_m` | Ollama tag (`q4_k_m`, `q6_k`, `bf16`) |
+| `NUEXTRACT_OLLAMA_NUM_CTX` | `32768` | Requested Ollama context window |
+| `NUEXTRACT_DEVICE` | `auto` | Transformers device: `auto`, `cpu`, `cuda`, `mps` |
+| `NUEXTRACT_DTYPE` | `auto` | Transformers dtype: `float32`, `bfloat16`, `float16` |
+| `NUEXTRACT_CPU_THREADS` | `0` | PyTorch CPU thread count (`0` = auto) |
+| `NUEXTRACT_LOCAL_MAX_OUTPUT_TOKENS` | `4096` | Output cap for in-process inference |
 | `NUEXTRACT_MAX_PAGES` | `40` | Hard page cap per document |
 | `NUEXTRACT_DPI` | `200` | PDF render resolution |
 | `NUEXTRACT_PAGES_PER_REQUEST` | `8` | Pages per model call |
@@ -205,8 +259,10 @@ See [.env.example](.env.example) for the full list.
 
 ## Deployment
 
+- [docs/cpu.md](docs/cpu.md) — CPU setup (Ollama, llama.cpp, Transformers),
+  memory/latency expectations, tuning and troubleshooting.
 - [docs/deployment.md](docs/deployment.md) — GPU sizing, vLLM flags, quantization,
-  Docker, Kubernetes, cloud options.
+  Docker, CPU deployment, Kubernetes, cloud options.
 - [deploy/kubernetes](deploy/kubernetes) — production manifests.
 - [docs/architecture.md](docs/architecture.md) — internals and design decisions.
 

@@ -15,7 +15,7 @@ sequenceDiagram
     participant A as FastAPI
     participant D as Ingestion
     participant R as Router
-    participant V as vLLM
+    participant V as Model backend
     participant P as Post-processor
 
     C->>A: POST /v1/extract (file, template)
@@ -56,7 +56,7 @@ sequenceDiagram
   the whole chunk is sent as images. Otherwise, the chunk is sent as text with
   `<page number="...">` markers. This keeps page order unambiguous.
 - **Chunking**: `pages_per_request` (default 8) bounds prompt size and output
-  length. vLLM batches internally, so chunks are processed sequentially.
+  length. Chunks are processed sequentially; remote servers batch internally.
 - **Merging**: `merge_structured_results` recursively merges objects, concatenates
   arrays (e.g. line items across pages), and keeps the first non-null scalar.
 - **Warnings over failures**: a single unparseable chunk does not fail the whole
@@ -64,11 +64,20 @@ sequenceDiagram
 
 ### `core/client.py` — inference backends
 
-- `VLLMClient`: async `httpx`, retries on 429/5xx with exponential backoff,
-  base64 data URLs for images.
-- NuExtract options are passed as **`chat_template_kwargs`**: `template`,
-  `instructions`, `enable_thinking`, `mode` (`markdown`, `template-generation`).
-- `TransformersClient`: lazy in-process fallback behind the same protocol.
+- `VLLMClient`: async `httpx` for any OpenAI-compatible server (vLLM,
+  llama.cpp), retries on 429/5xx with exponential backoff, base64 data URLs for
+  images. NuExtract options are passed as **`chat_template_kwargs`**:
+  `template`, `instructions`, `enable_thinking`, `mode` (`markdown`,
+  `template-generation`).
+- `OllamaClient`: uses Ollama's OpenAI-compatible API and the official
+  `numind/nuextract3` Modelfile, which maps the same options to message roles
+  (`template`, `instructions`, `mode`). `reasoning_effort` toggles thinking.
+- `TransformersClient`: lazy in-process backend for CPU, CUDA and MPS. Device and
+  dtype are resolved by `core/runtime.py`; `device_map` is only used for
+  multi-GPU sharding.
+- `AutoClient`: probes vLLM, then Ollama, then Transformers once per process.
+- `BackendInfo`: every client describes its provider, model, device, dtype and
+  endpoint; `/ready` exposes it.
 
 ### `core/templates.py` — contract with the model
 
@@ -93,7 +102,9 @@ The model is not trusted to emit perfectly valid JSON. We:
 
 | Decision | Rationale | Trade-off |
 | --- | --- | --- |
-| Separate vLLM service | GPU isolation, batching, independent scaling | extra network hop |
+| Separate model service | accelerator isolation, batching, independent scaling | extra network hop |
+| One client protocol, four backends | same code on GPU, CPU, and Apple Metal | backend-specific quirks are isolated in `client.py` |
+| Auto provider detection | zero-config local start | explicit providers are recommended in production |
 | Text-first routing | cheaper prompt, exact characters, less OCR drift | layout lost on text-only path |
 | Render all pages | one code path for scans, previews, markdown | CPU + memory for large PDFs |
 | Per-chunk merging | handles long documents and context limits | cross-page reasoning is weaker |
@@ -106,6 +117,8 @@ The model is not trusted to emit perfectly valid JSON. We:
 - The API is stateless: scale replicas behind a load balancer.
 - vLLM throughput is GPU-bound; tune `--max-num-seqs`,
   `--gpu-memory-utilization`, `--max-model-len`.
+- CPU backends scale by quantization (Q4_K_M), thread count, and smaller
+  `pages_per_request`; Ollama/llama.cpp keep the model in a single process.
 - For long documents, vertical scaling (bigger GPU / more KV cache) matters more
   than more API replicas.
 - Model weights should live on a persistent volume or be baked into the image for

@@ -9,7 +9,10 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-Provider = Literal["vllm", "transformers"]
+# ``auto`` probes vLLM, then Ollama, then falls back to in-process Transformers.
+Provider = Literal["auto", "vllm", "ollama", "llamacpp", "transformers"]
+Device = Literal["auto", "cpu", "cuda", "mps"]
+DType = Literal["auto", "float32", "bfloat16", "float16"]
 
 
 class Settings(BaseSettings):
@@ -34,12 +37,28 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
     # --- Inference backend --------------------------------------------------
-    provider: Provider = "vllm"
+    # auto: probe vLLM -> Ollama -> in-process Transformers.
+    provider: Provider = "auto"
     model_base_url: str = "http://localhost:8000/v1"
     model_api_key: str = "EMPTY"
     model_name: str = "numind/NuExtract3"
     request_timeout_s: float = 180.0
     max_retries: int = 2
+    auto_probe_timeout_s: float = 1.5
+
+    # --- Local inference (transformers provider) ----------------------------
+    device: Device = "auto"
+    dtype: DType = "auto"
+    cpu_threads: int = 0  # 0 = let PyTorch decide
+    local_max_output_tokens: int = 4096
+    trust_remote_code: bool = True
+
+    # --- Ollama (CPU/GPU, GGUF) --------------------------------------------
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "nuextract3:q4_k_m"
+    # Forwarded as ``num_ctx`` on newer Ollama builds; also set the server-wide
+    # OLLAMA_CONTEXT_LENGTH env var for older versions (see docker-compose.cpu.yml).
+    ollama_num_ctx: int = 32768
 
     # --- Document handling --------------------------------------------------
     max_upload_mb: int = 50
@@ -59,7 +78,7 @@ class Settings(BaseSettings):
     # --- Templates ----------------------------------------------------------
     templates_dir: Path = Path("configs/templates")
 
-    @field_validator("model_base_url")
+    @field_validator("model_base_url", "ollama_base_url")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
@@ -81,6 +100,13 @@ class Settings(BaseSettings):
         if self.model_base_url.endswith("/v1"):
             return self.model_base_url
         return f"{self.model_base_url}/v1"
+
+    @property
+    def ollama_openai_base_url(self) -> str:
+        """Ollama's OpenAI-compatible endpoint (``/v1``)."""
+        if self.ollama_base_url.endswith("/v1"):
+            return self.ollama_base_url
+        return f"{self.ollama_base_url}/v1"
 
 
 @lru_cache

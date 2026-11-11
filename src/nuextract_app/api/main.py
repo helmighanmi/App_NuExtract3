@@ -18,6 +18,7 @@ from nuextract_app.config import Settings, get_settings
 from nuextract_app.core.client import ModelBackendError
 from nuextract_app.core.document import DocumentError
 from nuextract_app.core.pipeline import ExtractionError
+from nuextract_app.core.runtime import detect_runtime
 from nuextract_app.core.templates import TemplateError
 from nuextract_app.logging import configure_logging, get_logger, request_id_var
 
@@ -28,11 +29,14 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(settings.log_level)
+    runtime = detect_runtime(settings.device, settings.dtype)
     logger.info(
-        "Starting %s (provider=%s, model=%s, backend=%s)",
+        "Starting %s (provider=%s, model=%s, device=%s/%s, endpoint=%s)",
         settings.app_name,
         settings.provider,
         settings.model_name,
+        runtime.device,
+        runtime.dtype,
         settings.openai_base_url,
     )
     yield
@@ -46,7 +50,8 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=__version__,
         description=(
-            "Document intelligence API powered by **NuExtract3** and served with vLLM. "
+            "Document intelligence API powered by **NuExtract3**. Supports vLLM on GPU "
+            "and Ollama, llama.cpp or in-process Transformers on CPU. "
             "Structured extraction, document-to-Markdown and template generation."
         ),
         lifespan=lifespan,

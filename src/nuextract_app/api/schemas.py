@@ -95,9 +95,18 @@ class HealthResponse(BaseModel):
     version: str
     provider: str
     model: str
+    backend: str | None = None
+    device: str | None = None
+    dtype: str | None = None
+    torch_available: bool | None = None
 
 
 class ReadyResponse(BaseModel):
     status: str
     backend: bool
     provider: str
+    resolved_provider: str | None = None
+    device: str | None = None
+    dtype: str | None = None
+    endpoint: str | None = None
+    note: str | None = None
