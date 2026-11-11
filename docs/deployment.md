@@ -68,9 +68,10 @@ Never rely on the default `EMPTY` key on a public network.
 
 ## Docker
 
-The CPU and GPU concerns are split into two images:
+The CPU and GPU concerns are split into separate images/overlays:
 
 - `docker/Dockerfile.app` — FastAPI + Streamlit, no model, non-root, ~small.
+- `docker/Dockerfile.cpu` — adds CPU-only PyTorch for in-process Transformers.
 - `docker/Dockerfile.vllm` — `vllm/vllm-openai` + our serving entrypoint.
 
 ```bash
@@ -80,15 +81,59 @@ docker compose up --build -d
 # or a remote endpoint
 NUEXTRACT_DOCKER_MODEL_BASE_URL=https://gpu-host.example.com/v1 docker compose up --build -d
 
-# Full stack on a Linux NVIDIA host
+# Full GPU stack on a Linux NVIDIA host
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+
+# CPU stack: Ollama (GGUF) + API + Streamlit, no GPU required
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
 ```
 
 Pin the vLLM base image (`vllm/vllm-openai:vX.Y.Z`) in production; `latest` can
 change model support and flags.
 
-> Docker Desktop on macOS cannot run vLLM (no NVIDIA GPU passthrough). Use a remote
-> endpoint, a Linux GPU host, or the `transformers` provider for tiny tests.
+> Docker Desktop on macOS cannot run vLLM (no NVIDIA GPU passthrough). Use a
+> remote endpoint, the CPU stack, or native Ollama. For the best Apple Silicon
+> performance, run Ollama natively so it can use Metal.
+
+## CPU deployment
+
+vLLM does not run on CPU or macOS. Use one of the paths below; all of them are
+supported by the same API and Streamlit UI.
+
+| Path | Image / command | Best for |
+| --- | --- | --- |
+| Ollama (GGUF) | `docker-compose.cpu.yml` or native `ollama pull nuextract3:q4_k_m` | Recommended CPU path |
+| llama.cpp server | `llama-server` + official GGUF + `mmproj` | Fine-grained control |
+| Transformers | `docker/Dockerfile.cpu`, `NUEXTRACT_PROVIDER=transformers` | No extra service |
+
+Quick start with Docker:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up --build -d
+```
+
+Quick start with native Ollama:
+
+```bash
+ollama pull nuextract3:q4_k_m
+export NUEXTRACT_PROVIDER=ollama
+make api
+```
+
+CPU sizing:
+
+| Quantization | Disk | Approx. RAM | Notes |
+| --- | --- | --- | --- |
+| Q4_K_M | 3.4 GB | 5–6 GB | default; best speed/quality trade-off |
+| Q6_K | 4.1 GB | 6–8 GB | slower, slightly better |
+| BF16 | 9.3 GB | 12–16 GB | reference quality |
+| Transformers float32 | ~16 GB | 18–20 GB | smoke tests only |
+
+Expect tens of seconds to several minutes per scanned page depending on CPU,
+quantization, page count and output length. Reduce `pages_per_request`,
+`dpi`, `max_output_tokens` and keep thinking disabled for CPU workloads.
+
+See [docs/cpu.md](cpu.md) for setup, benchmarks, tuning and troubleshooting.
 
 ## Kubernetes
 
