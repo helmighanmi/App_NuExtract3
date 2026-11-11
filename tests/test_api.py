@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from nuextract_app.api.deps import get_pipeline
 from nuextract_app.api.main import create_app
 from nuextract_app.config import Settings, get_settings
+from nuextract_app.core.client import BackendInfo
 from nuextract_app.core.pipeline import (
     ExtractionResult,
     MarkdownResult,
@@ -54,6 +55,15 @@ class FakePipeline:
     async def health(self) -> bool:
         return True
 
+    def backend_info(self) -> BackendInfo:
+        return BackendInfo(
+            provider="fake",
+            model="fake-model",
+            device="cpu",
+            dtype="float32",
+            endpoint="http://fake",
+        )
+
     async def close(self) -> None:
         pass
 
@@ -70,8 +80,22 @@ def client(text_pdf: bytes) -> TestClient:
 def test_health(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["provider"]
+    assert "torch_available" in payload
     assert response.headers["x-request-id"]
+
+
+def test_ready_reports_resolved_backend(client: TestClient) -> None:
+    response = client.get("/ready")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ready"
+    assert payload["backend"] is True
+    assert payload["resolved_provider"] == "fake"
+    assert payload["device"] == "cpu"
+    assert payload["dtype"] == "float32"
 
 
 def test_extract_endpoint(client: TestClient) -> None:

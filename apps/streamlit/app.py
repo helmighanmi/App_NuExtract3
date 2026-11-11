@@ -140,14 +140,28 @@ with st.sidebar:
     ready = st.session_state.ready
     if health:
         st.success(f"{health['model']}")
-        st.caption(f"provider: {health['provider']} · v{health['version']}")
+        device = health.get("device") or "auto"
+        st.caption(f"provider: {health['provider']} · device: {device} · v{health['version']}")
+        if health.get("torch_available"):
+            st.caption("PyTorch available for in-process inference")
     if ready:
         if ready.get("ok"):
+            resolved = ready.get("resolved_provider") or ready.get("provider")
+            details = [f"backend: {resolved}"]
+            if ready.get("device"):
+                details.append(f"device: {ready['device']}")
+            if ready.get("dtype"):
+                details.append(f"dtype: {ready['dtype']}")
             st.success("Model backend ready")
+            st.caption(" · ".join(details))
+            if ready.get("note"):
+                st.caption(str(ready["note"]))
         else:
             st.warning("Model backend not ready")
             if ready.get("status"):
                 st.caption(str(ready["status"]))
+            if ready.get("note"):
+                st.caption(str(ready["note"]))
 
     st.divider()
     st.subheader("Processing")
@@ -504,8 +518,10 @@ with about_tab:
    with PyMuPDF; native text layers are detected.
 2. **Routing** — digital pages with a text layer are sent as *text* (cheaper, more
    precise). Scanned pages are sent as *images*. Mixed documents are handled per page.
-3. **Inference** — vLLM serves `numind/NuExtract3` behind an OpenAI-compatible API.
-   The JSON template and instructions travel in `chat_template_kwargs`.
+3. **Inference** — a model backend serves `numind/NuExtract3`. On GPU this is
+   vLLM; on CPU it can be Ollama or llama.cpp with the official GGUF build, or
+   in-process Transformers. The JSON template and instructions travel as
+   `chat_template_kwargs` (or Ollama message roles).
 4. **Post-processing** — JSON is repaired (code fences, trailing commas), chunks are
    merged, and missing keys are filled so the output always matches the template.
 5. **Serving** — FastAPI exposes `/v1/extract`, `/v1/extract/batch`, `/v1/markdown`,
